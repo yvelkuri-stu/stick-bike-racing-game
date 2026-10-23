@@ -235,6 +235,17 @@
       .breakTable tr.total td { border-bottom: none; border-top: 2px solid rgba(94,234,212,0.5); font-size: 19px; color: #5eead4; padding-top: 9px; }
       .breakTable tr.total td:last-child { color: #5eead4; text-shadow: 0 0 12px rgba(45,212,191,0.6); }
       #newBest { display: none; text-align: center; margin-top: 8px; font-family: "Orbitron", monospace; font-weight: 700; color: #fde68a; letter-spacing: 0.14em; font-size: 14px; text-shadow: 0 0 14px rgba(251,191,36,0.7); }
+      #challengeBox { border: 1.5px solid rgba(251,191,36,0.55); background: rgba(66,32,6,0.35); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; }
+      #challengeTxt { color: #fde68a; font-weight: 700; font-size: 15.5px; line-height: 1.45; }
+      #challengeTxt b { color: #fff; font-family: "Orbitron", monospace; font-size: 14px; }
+      #challengeClear { margin-top: 9px; padding: 8px 14px; font-size: 12.5px; }
+      .codeRow { display: flex; gap: 8px; }
+      .codeRow input { flex: 1; min-width: 0; background: rgba(10,20,38,0.85); border: 1.5px solid rgba(120,180,220,0.35); border-radius: 12px; color: #e8f4ff; font-family: "Orbitron", monospace; font-weight: 700; font-size: 15px; letter-spacing: 0.12em; padding: 11px 13px; text-transform: uppercase; }
+      .codeRow input::placeholder { color: #5f7d94; font-size: 12px; letter-spacing: 0.04em; }
+      .codeRow .btn { padding: 11px 18px; font-size: 14px; }
+      #challengeVerdict { display: none; text-align: center; margin-top: 10px; font-weight: 700; font-size: 15.5px; color: #a5f3fc; line-height: 1.4; }
+      #challengeVerdict.won { color: #fde68a; text-shadow: 0 0 14px rgba(251,191,36,0.6); }
+      #challengeVerdict b { font-family: "Orbitron", monospace; font-size: 14.5px; }
       @media (max-width: 620px) {
         #controls { flex-wrap: wrap; }
         .actGroup { order: -1; width: 100%; justify-content: center; margin-bottom: 10px; }
@@ -395,6 +406,17 @@
           <div class="secLab">YOUR BESTS (SAVED ON THIS DEVICE)</div>
           <div class="bestLine" id="bestLine"><span>No rides yet — set your first record!</span></div>
 
+          <div class="secLab">FRIEND CHALLENGE</div>
+          <div id="challengeBox" style="display:none">
+            <div id="challengeTxt"></div>
+            <button class="btn ghost" id="challengeClear" type="button">&#10005; CLEAR CHALLENGE</button>
+          </div>
+          <div class="codeRow">
+            <input id="codeInput" type="text" maxlength="13" placeholder="ENTER A FRIEND'S CODE" autocomplete="off" autocapitalize="characters" spellcheck="false"/>
+            <button class="btn ghost" id="codeApply" type="button">APPLY</button>
+          </div>
+          <div class="motionNote">A code from a friend's card replays their exact road, mode &amp; difficulty — beat their score on the same run.</div>
+
           <button class="btn big" id="startBtn">START ENGINE &#9654;</button>
           <div class="helpTxt" id="helpTxt">
             <b>PEDALS:</b> Touch GAS / BRAKE pedals + LEAN buttons. Turn on <b>Cruise</b> and the bike holds a comfy pace by itself — no more holding GAS.<br/>
@@ -460,6 +482,7 @@
             <tr class="total"><td>TOTAL SCORE</td><td id="brScore">0</td></tr>
           </table>
           <div class="bestLine" id="overBest" style="margin-top:10px"></div>
+          <div id="challengeVerdict"></div>
           <button class="btn big gold" id="againBtn">RIDE AGAIN &#9654;</button>
           <div class="btnRow">
             <button class="btn ghost" id="cardBtn">PLAYER CARD</button>
@@ -471,7 +494,7 @@
             <a class="shareChip" id="shareX" href="#" target="_blank" rel="noopener">X / Twitter</a>
             <a class="shareChip" id="shareFB" href="#" target="_blank" rel="noopener">Facebook</a>
             <a class="shareChip" id="shareTG" href="#" target="_blank" rel="noopener">Telegram</a>
-            <button class="shareChip" id="shareCopy" type="button">Copy Link</button>
+            <button class="shareChip" id="shareCopy" type="button">Copy Code</button>
           </div>
           <div class="footLine">GAMES TRIBELL STUDIOS</div>
         </div>
@@ -554,7 +577,7 @@
       fuel: 100, timeLeft: 0, nextCp: 250, cpHit: 0, finished: false,
       endReason: "", crashT: 0, finishT: 0, cdT: 0, cdShown: 0,
       airTime: 0, airRot: 0, airborne: false, flipAwarded: 0,
-      biomeIdx: 0, runSeed: 1, score: 0, stars: 0,
+      biomeIdx: 0, runSeed: 1, score: 0, stars: 0, farX: 0, farBiome: 0, challenge: null,
       input: { gas: false, brake: false, leanB: false, leanF: false },
       controlMode: "pedals", cruise: false, effGas: false,
       tiltSens: "normal", tiltNeutral: null, tiltCur: 0, tiltDeg: 0, tiltListening: false, motionOK: false,
@@ -868,6 +891,7 @@
     /* ============================== TERRAIN ============================== */
     const TSEG = 5;
     let tPts = [0, 0, 0], tSlope = 0, terrainRand = mulberry32(1);
+    let runRand = mulberry32(7); // gameplay RNG (rivals / events) — reseeded per run so challenge codes replay the same run
     function biomeInfoAt(x) {
       const idx = Math.max(0, Math.floor(x / BIOME_LEN));
       const within = x - idx * BIOME_LEN;
@@ -1120,7 +1144,7 @@
       const lean = clamp((inp.leanB ? 1 : 0) - (inp.leanF ? 1 : 0) + (S.controlMode === "tilt" ? S.tiltCur : 0), -1.4, 1.4);
       const I = 1.5;
       Tq += lean * (anyContact ? 2.4 * (0.35 + 0.65 * grip) : 5.2) * I;
-      if (S.oilT > 0 && anyContact) Tq += (Math.random() - 0.5) * 5.5 * I; // oil slide jitter
+      if (S.oilT > 0 && anyContact) Tq += (runRand() - 0.5) * 5.5 * I; // oil slide jitter
       if (!anyContact && canDrive) {
         if (S.effGas) Tq += 2.3 * I;
         if (inp.brake) Tq -= 2.3 * I;
@@ -1199,16 +1223,16 @@
     let rivals = [], rivalTimer = 9, bonusCoins = [];
     function spawnRival(forceAhead) {
       if (rivals.length >= 3) return;
-      const fromBehind = !forceAhead && Math.random() < 0.45;
+      const fromBehind = !forceAhead && runRand() < 0.45;
       const base = Math.max(6, Math.abs(bike.vx));
       const r = {
-        name: RIVAL_NAMES[(Math.random() * RIVAL_NAMES.length) | 0],
-        color: RIVAL_COLS[(Math.random() * RIVAL_COLS.length) | 0],
+        name: RIVAL_NAMES[(runRand() * RIVAL_NAMES.length) | 0],
+        color: RIVAL_COLS[(runRand() * RIVAL_COLS.length) | 0],
         x: 0, speed: 0, cruise: 0, state: "ride", t: 0, spin: 0, y: 0,
         flinch: 0, alongside: 0, warned: false, warnT: 0, wasAhead: false
       };
-      if (fromBehind) { r.x = bike.x - 34 - Math.random() * 10; r.cruise = base + 3.5 + Math.random() * 2.5; }
-      else { r.x = bike.x + 46 + Math.random() * 16; r.cruise = Math.max(5, base * (0.55 + Math.random() * 0.3)); }
+      if (fromBehind) { r.x = bike.x - 34 - runRand() * 10; r.cruise = base + 3.5 + runRand() * 2.5; }
+      else { r.x = bike.x + 46 + runRand() * 16; r.cruise = Math.max(5, base * (0.55 + runRand() * 0.3)); }
       r.speed = r.cruise; r.wasAhead = r.x > bike.x; r.y = terrainH(r.x) + WR + 0.1;
       rivals.push(r);
     }
@@ -1229,7 +1253,7 @@
     function updateRivals(dt) {
       const scale = S.diff === "hard" ? 0.7 : S.diff === "med" ? 0.9 : 1.25;
       rivalTimer -= dt;
-      if (rivalTimer <= 0 && S.runTime > 6) { spawnRival(false); rivalTimer = (8 + Math.random() * 8) * scale; }
+      if (rivalTimer <= 0 && S.runTime > 6) { spawnRival(false); rivalTimer = (8 + runRand() * 8) * scale; }
       const pv = Math.abs(bike.vx);
       for (let i = rivals.length - 1; i >= 0; i--) {
         const r = rivals[i];
@@ -1325,13 +1349,13 @@
       if (prop === "pine" || prop === "rock") pool.push("rocks", "rocks");
       if (prop === "cactus") pool.push("gust", "gust");
       if (prop !== "cactus") pool.push("rain");
-      const kind = pool[(Math.random() * pool.length) | 0];
+      const kind = pool[(runRand() * pool.length) | 0];
       const bx = bike.x;
       if (kind === "car") {
-        EVS.list.push({ kind, x: bx + 68, speed: 5.2 + Math.random() * 1.6, passed: false, hazard: true, col: ["#e11d48", "#2563eb", "#f59e0b", "#e2e8f0"][(Math.random() * 4) | 0] });
+        EVS.list.push({ kind, x: bx + 68, speed: 5.2 + runRand() * 1.6, passed: false, hazard: true, col: ["#e11d48", "#2563eb", "#f59e0b", "#e2e8f0"][(runRand() * 4) | 0] });
         evBanner("TRAFFIC AHEAD!", "DODGE IT — OR SQUEEZE PAST FOR BONUS");
       } else if (kind === "animal") {
-        EVS.list.push({ kind, x: bx + 58, state: "stand", vx: 0, hazard: true, cow: Math.random() < 0.6, seed: Math.random() * 10 });
+        EVS.list.push({ kind, x: bx + 58, state: "stand", vx: 0, hazard: true, cow: runRand() < 0.6, seed: runRand() * 10 });
         evBanner("ANIMAL ON THE ROAD!", "BRAKE — OR HONK (H) TO SCARE IT OFF");
       } else if (kind === "oil") {
         EVS.list.push({ kind, x: bx + 44, len: 7, hazard: true });
@@ -1363,7 +1387,7 @@
       EVS.timer -= dt;
       if (S.runTime > 10 && EVS.timer <= 0) {
         fireEvent();
-        EVS.timer = (17 + Math.random() * 12) * (S.diff === "hard" ? 0.7 : S.diff === "med" ? 0.85 : 1);
+        EVS.timer = (17 + runRand() * 12) * (S.diff === "hard" ? 0.7 : S.diff === "med" ? 0.85 : 1);
       }
       let onOil = false, gust = 0, raining = false;
       for (let i = EVS.list.length - 1; i >= 0; i--) {
@@ -1393,9 +1417,9 @@
         } else if (e.kind === "rocks") {
           e.t -= dt; e.spawnT -= dt;
           if (e.spawnT <= 0 && e.t > 0.6) {
-            e.spawnT = 0.65 + Math.random() * 0.4;
-            const rx = bike.x + 3 + Math.random() * 15;
-            e.rocks.push({ x: rx, y: terrainH(rx) + 13 + Math.random() * 3, vy: 0, r: 0.3 + Math.random() * 0.28, rot: Math.random() * TAU });
+            e.spawnT = 0.65 + runRand() * 0.4;
+            const rx = bike.x + 3 + runRand() * 15;
+            e.rocks.push({ x: rx, y: terrainH(rx) + 13 + runRand() * 3, vy: 0, r: 0.3 + runRand() * 0.28, rot: runRand() * TAU });
           }
           for (let j = e.rocks.length - 1; j >= 0; j--) {
             const rk = e.rocks[j];
@@ -2223,8 +2247,11 @@
       toastTimer = setTimeout(() => els.toast.classList.remove("show"), ms || 2400);
     }
     function resetWorld() {
-      S.runSeed = (Math.random() * 1e9) | 0;
+      // a loaded friend challenge pins the seed, so terrain, items, fuel,
+      // rivals and events all replay identically; otherwise a fresh seed
+      S.runSeed = S.challenge ? S.challenge.seed : (Math.random() * SEED_SPACE) | 0;
       terrainRand = mulberry32(S.runSeed);
+      runRand = mulberry32((S.runSeed ^ 0x9e3779b9) >>> 0);
       tPts = [0, 0, 0]; tSlope = 0;
       itemCache.clear();
       fuelList = []; nextFuelX = 170;
@@ -2243,7 +2270,7 @@
       els.wheelieWrap.classList.remove("on");
       S.fuel = 100; S.finished = false; S.endReason = "";
       S.airborne = false; S.airTime = 0; S.airRot = 0; S.flipAwarded = 0;
-      S.biomeIdx = 0;
+      S.biomeIdx = 0; S.farX = 0; S.farBiome = 0;
       const D = DIFFS[S.diff];
       S.timeLeft = S.mode === "race" ? D.t0 : 0;
       S.nextCp = 250; S.cpHit = 0;
@@ -2331,6 +2358,17 @@
       $("brTime").textContent = S.timeBonus + " pts";
       $("brScore").textContent = S.score;
       $("overBest").innerHTML = "<span>Best distance <b>" + BEST[S.mode].dist + " m</b></span><span>Best score <b>" + BEST[S.mode].score + "</b></span>";
+      const cvEl = $("challengeVerdict");
+      if (S.challenge) {
+        cvEl.style.display = "block";
+        if (S.score > S.challenge.target) {
+          cvEl.className = "won";
+          cvEl.innerHTML = "&#127942; <b>CHALLENGE BEATEN!</b> Target was " + S.challenge.target + " pts — same road, your score wins.";
+        } else {
+          cvEl.className = "";
+          cvEl.innerHTML = "&#9876;&#65038; Challenge target <b>" + S.challenge.target + " pts</b> — you were " + (S.challenge.target - S.score) + " short. RIDE AGAIN replays the same road!";
+        }
+      } else { cvEl.style.display = "none"; cvEl.className = ""; }
       els.hud.classList.remove("on");
       els.controls.classList.remove("on");
       els.wheelieWrap.classList.remove("on");
@@ -2384,7 +2422,7 @@
         S.cdT -= dt;
         const n = Math.ceil(S.cdT);
         if (n !== S.cdShown && n >= 1 && n <= 3) { S.cdShown = n; showBanner(String(n), "GET READY", 700); AU.beep(false); }
-        if (S.cdT <= 0) { S.screen = "play"; showBanner("GO!", BIOMES[0].name, 800); AU.beep(true); }
+        if (S.cdT <= 0) { S.screen = "play"; showBanner("GO!", S.challenge ? "⚔️ CHALLENGE — BEAT " + S.challenge.target + " PTS" : BIOMES[0].name, S.challenge ? 1400 : 800); AU.beep(true); }
         return;
       }
       if (S.screen !== "play") return;
@@ -2497,6 +2535,8 @@
           }
         }
       }
+      // furthest point reached — the card & share message celebrate this land
+      if (bike.x > S.farX) { S.farX = bike.x; S.farBiome = biomeInfoAt(bike.x).a; }
       // biome change
       const bi = Math.floor(Math.max(0, bike.x) / BIOME_LEN) % BIOMES.length;
       if (bi !== S.biomeIdx) {
@@ -2547,38 +2587,224 @@
       }
     }
 
+    /* ============================== CHALLENGE CODES ============================== */
+    // A challenge code packs everything that defines a run — terrain seed,
+    // mode, difficulty and the score to beat — into 9 Crockford-base32 chars
+    // (8 payload + 1 checksum), displayed grouped as XXX-XXX-XXX. Terrain,
+    // items, fuel, rivals and events all run off the seed, so a friend who
+    // opens the ?c= link (or types the code on the setup screen) rides the
+    // exact same road with the same target.
+    const B32 = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    const DIFF_LIST = ["easy", "med", "hard"];
+    const SEED_SPACE = 1048576; // 2^20 seeds — plenty of roads, keeps codes short
+    const BIOME_EMOJI = ["\u{1F333}", "\u{1F3D9}️", "\u{1F335}", "❄️", "\u{1F305}", "\u{1F303}", "\u{1F342}", "\u{1F30B}", "\u{1F680}"];
+    function challengeEncode(seed, mode, diff, score) {
+      const s = ((seed % SEED_SPACE) + SEED_SPACE) % SEED_SPACE;
+      const m = mode === "race" ? 1 : 0;
+      const d = Math.max(0, DIFF_LIST.indexOf(diff));
+      const sc = clamp(Math.round(score) || 0, 0, 131071);
+      let v = ((s * 2 + m) * 4 + d) * 131072 + sc; // 40-bit payload — exact in a double
+      const digs = [];
+      for (let i = 0; i < 8; i++) { digs.unshift(v % 32); v = Math.floor(v / 32); }
+      let chk = 0; for (let i = 0; i < 8; i++) chk += digs[i] * (i + 3);
+      const str = digs.concat([chk % 32]).map(n => B32[n]).join("");
+      return str.slice(0, 3) + "-" + str.slice(3, 6) + "-" + str.slice(6);
+    }
+    function challengeDecode(text) {
+      if (!text) return null;
+      const t = String(text).toUpperCase().replace(/[^0-9A-Z]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+      if (t.length !== 9) return null;
+      const digs = [];
+      for (const ch of t) { const n = B32.indexOf(ch); if (n < 0) return null; digs.push(n); }
+      let chk = 0; for (let i = 0; i < 8; i++) chk += digs[i] * (i + 3);
+      if (chk % 32 !== digs[8]) return null;
+      let v = 0; for (let i = 0; i < 8; i++) v = v * 32 + digs[i];
+      const sc = v % 131072; v = Math.floor(v / 131072);
+      const d = v % 4; v = Math.floor(v / 4);
+      const m = v % 2; const s = Math.floor(v / 2);
+      if (d > 2 || s >= SEED_SPACE) return null;
+      return { seed: s, mode: m ? "race" : "endless", diff: DIFF_LIST[d], target: sc };
+    }
+    function currentRunCode() { return challengeEncode(S.runSeed, S.mode, S.diff, S.score); }
+    function challengeLink() { const u = gameUrl(); return u ? u + "?c=" + currentRunCode() : ""; }
+    function prettyBiome(name) { return name.toLowerCase().replace(/\b\w/g, ch => ch.toUpperCase()); }
+    function renderChallengeUI() {
+      const box = $("challengeBox");
+      if (!box) return;
+      if (S.challenge) {
+        box.style.display = "";
+        $("challengeTxt").innerHTML = "&#9876;&#65038; <b>CHALLENGE LOADED</b> — " +
+          (S.challenge.mode === "race" ? "Checkpoint Race" : "Endless Ride") + " · " + S.challenge.diff.toUpperCase() +
+          "<br/>Beat <b>" + S.challenge.target + " pts</b> on the same road · code <b>" + S.challenge.code + "</b>";
+      } else box.style.display = "none";
+    }
+    function applyChallenge(dec, silent) {
+      if (!dec) return false;
+      S.challenge = { seed: dec.seed, mode: dec.mode, diff: dec.diff, target: dec.target, code: challengeEncode(dec.seed, dec.mode, dec.diff, dec.target) };
+      S.mode = dec.mode; S.diff = dec.diff;
+      syncSetup();
+      renderChallengeUI();
+      if (!silent) toast("⚔️ Challenge loaded — beat " + dec.target + " pts on the same road!", 2800);
+      return true;
+    }
+    function clearChallenge(silent) {
+      if (!S.challenge) return;
+      S.challenge = null;
+      renderChallengeUI();
+      if (!silent) toast("Challenge cleared — fresh random road next run", 1800);
+    }
+    function loadChallengeFromUrl() {
+      try {
+        const c = new URLSearchParams(window.location.search).get("c");
+        if (c && applyChallenge(challengeDecode(c), true) && S.challenge)
+          toast("⚔️ Friend challenge loaded — beat " + S.challenge.target + " pts!", 3200);
+      } catch (e) { /* no query string — normal start */ }
+    }
+
     /* ============================== PLAYER CARD ============================== */
+    function rrPath(g, x, y, w, h, r) {
+      g.beginPath();
+      g.moveTo(x + r, y);
+      g.arcTo(x + w, y, x + w, y + h, r);
+      g.arcTo(x + w, y + h, x, y + h, r);
+      g.arcTo(x, y + h, x, y, r);
+      g.arcTo(x, y, x + w, y, r);
+      g.closePath();
+    }
+    function cardProp(g, kind, x, gy, s, col) {
+      g.fillStyle = col; g.strokeStyle = col;
+      if (kind === "pine") {
+        g.beginPath();
+        g.moveTo(x, gy - 96 * s); g.lineTo(x + 27 * s, gy - 30 * s); g.lineTo(x + 11 * s, gy - 30 * s);
+        g.lineTo(x + 31 * s, gy); g.lineTo(x - 31 * s, gy); g.lineTo(x - 11 * s, gy - 30 * s); g.lineTo(x - 27 * s, gy - 30 * s);
+        g.closePath(); g.fill();
+        g.fillRect(x - 4 * s, gy - 8 * s, 8 * s, 10 * s);
+      } else if (kind === "cactus") {
+        g.beginPath(); g.roundRect(x - 9 * s, gy - 80 * s, 18 * s, 80 * s, 9 * s); g.fill();
+        g.beginPath(); g.roundRect(x - 31 * s, gy - 60 * s, 12 * s, 36 * s, 6 * s); g.roundRect(x + 19 * s, gy - 48 * s, 12 * s, 28 * s, 6 * s); g.fill();
+        g.fillRect(x - 31 * s, gy - 32 * s, 22 * s, 8 * s); g.fillRect(x + 9 * s, gy - 26 * s, 22 * s, 8 * s);
+      } else if (kind === "palm") {
+        g.lineWidth = 9 * s; g.lineCap = "round";
+        g.beginPath(); g.moveTo(x, gy); g.quadraticCurveTo(x + 10 * s, gy - 55 * s, x + 27 * s, gy - 84 * s); g.stroke();
+        g.lineWidth = 6 * s;
+        for (const a of [-0.3, 0.4, 1.0, 1.7, 2.5, 3.1]) {
+          g.beginPath(); g.moveTo(x + 27 * s, gy - 84 * s);
+          g.quadraticCurveTo(x + 27 * s + Math.cos(a) * 30 * s, gy - 84 * s + Math.sin(a) * 14 * s - 9 * s,
+            x + 27 * s + Math.cos(a) * 48 * s, gy - 84 * s + Math.sin(a) * 24 * s + 12 * s); g.stroke();
+        }
+      } else if (kind === "rock") {
+        g.beginPath();
+        g.moveTo(x - 36 * s, gy); g.lineTo(x - 15 * s, gy - 42 * s); g.lineTo(x + 9 * s, gy - 54 * s);
+        g.lineTo(x + 33 * s, gy - 18 * s); g.lineTo(x + 38 * s, gy); g.closePath(); g.fill();
+      } else { // leafy tree (meadows / autumn / fallback)
+        g.fillRect(x - 5 * s, gy - 36 * s, 10 * s, 38 * s);
+        g.beginPath();
+        g.arc(x, gy - 62 * s, 31 * s, 0, TAU); g.arc(x - 25 * s, gy - 42 * s, 21 * s, 0, TAU); g.arc(x + 25 * s, gy - 44 * s, 23 * s, 0, TAU);
+        g.fill();
+      }
+    }
+    /* Portrait share card in the style of the reference: soft biome-tinted
+       gradient, chunky title, framed scene of the furthest land reached,
+       a theme chip, a giant score, and the challenge code + play link. */
     function drawCard() {
       const c = document.createElement("canvas");
-      c.width = 1200; c.height = 630;
+      c.width = 1000; c.height = 1250;
       const g = c.getContext("2d");
-      const grd = g.createLinearGradient(0, 0, 1200, 630);
-      grd.addColorStop(0, "#0a1830"); grd.addColorStop(0.55, "#071022"); grd.addColorStop(1, "#03040a");
-      g.fillStyle = grd; g.fillRect(0, 0, 1200, 630);
-      g.strokeStyle = "rgba(34,211,238,0.16)"; g.lineWidth = 1;
-      for (let x = 0; x < 1200; x += 60) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 630); g.stroke(); }
-      for (let y = 0; y < 630; y += 60) { g.beginPath(); g.moveTo(0, y); g.lineTo(1200, y); g.stroke(); }
-      g.strokeStyle = "#22d3ee"; g.lineWidth = 5; g.strokeRect(14, 14, 1172, 602);
-      g.textAlign = "left";
-      g.fillStyle = "#7dd3fc"; g.font = "700 24px Rajdhani, sans-serif";
-      g.fillText("G A M E S   T R I B E L L   S T U D I O S", 56, 74);
-      g.fillStyle = "#ffffff"; g.font = "900 62px Orbitron, monospace";
-      g.fillText("STICK BIKE RACING", 52, 146);
-      g.fillStyle = "#5eead4"; g.font = "700 30px Orbitron, monospace";
-      g.fillText(S.mode === "race" ? "CHECKPOINT RACE · " + S.diff.toUpperCase() : "ENDLESS RIDE · " + S.diff.toUpperCase(), 56, 196);
-      // stars
-      g.font = "64px sans-serif";
-      for (let i = 0; i < 3; i++) {
-        g.fillStyle = i < S.stars ? "#fbbf24" : "#2b435f";
-        g.fillText("★", 56 + i * 74, 280);
+      const B = BIOMES[S.farBiome] || BIOMES[0];
+      const code = currentRunCode();
+      // ---- card body: soft gradient tinted by the furthest land ----
+      rrPath(g, 6, 6, 988, 1238, 54);
+      const bg = g.createLinearGradient(0, 0, 0, 1250);
+      bg.addColorStop(0, mixHex(B.skyTop, "#ffffff", 0.70));
+      bg.addColorStop(0.55, mixHex(B.skyBot, "#ffffff", 0.55));
+      bg.addColorStop(1, mixHex(B.gTop, "#ffffff", 0.68));
+      g.fillStyle = bg; g.fill();
+      g.strokeStyle = "rgba(255,255,255,0.7)"; g.lineWidth = 4; g.stroke();
+      g.textAlign = "center";
+      // ---- chunky title ----
+      g.font = "900 112px Orbitron, monospace";
+      g.shadowColor = "rgba(30,50,80,0.5)"; g.shadowOffsetY = 7; g.shadowBlur = 0;
+      g.fillStyle = "#ffffff";
+      g.fillText("STICK BIKE", 500, 142);
+      g.fillText("RACING", 500, 256);
+      g.shadowColor = "transparent"; g.shadowOffsetY = 0;
+      g.fillStyle = "#274b63"; g.font = "700 31px Rajdhani, sans-serif";
+      g.fillText("—  O P E N   R O A D  —", 500, 306);
+      // ---- framed scene: furthest land + motorbike & rider ----
+      const px = 64, py = 336, pw = 872, ph = 448;
+      g.save();
+      rrPath(g, px + 6, py + 6, pw - 12, ph - 12, 34); g.clip();
+      const sky = g.createLinearGradient(0, py, 0, py + ph);
+      sky.addColorStop(0, B.skyTop); sky.addColorStop(1, B.skyBot);
+      g.fillStyle = sky; g.fillRect(px, py, pw, ph);
+      if (B.moon) { // night stars
+        g.fillStyle = "rgba(230,238,255,0.9)";
+        for (let i = 0; i < 46; i++) {
+          g.beginPath(); g.arc(px + hash1(i * 3.17) * pw, py + hash1(i * 7.71) * ph * 0.42, 1.6 + hash1(i * 5.3) * 1.8, 0, TAU); g.fill();
+        }
       }
-      // mini bike & rider
+      // sun / moon with a soft halo
+      const sunX = px + pw * 0.75, sunY = py + 42 + B.sunY * ph * 0.5, sunR = B.sunR * 1.45;
+      g.fillStyle = B.sun; g.globalAlpha = 0.28;
+      g.beginPath(); g.arc(sunX, sunY, sunR * 1.7, 0, TAU); g.fill();
+      g.globalAlpha = 1;
+      g.beginPath(); g.arc(sunX, sunY, sunR, 0, TAU); g.fill();
+      if (B.buildings) { // skyline silhouette
+        g.fillStyle = B.far;
+        let bx2 = px + 14, n = 0;
+        while (bx2 < px + pw - 30 && n < 14) {
+          const bw = 44 + hash1(n * 7.31) * 62, bh = 56 + hash1(n * 3.97) * 118;
+          g.fillRect(bx2, py + ph * 0.68 - bh, bw, bh);
+          bx2 += bw + 13; n++;
+        }
+      }
+      const ridge = (baseY, amp, col, f1, f2) => {
+        g.fillStyle = col; g.beginPath(); g.moveTo(px, py + ph);
+        for (let x = px; x <= px + pw; x += 14) {
+          const t = (x - px) / pw;
+          g.lineTo(x, baseY - (Math.sin(t * f1 + 1.3) * amp + Math.sin(t * f2 + 0.5) * amp * 0.35));
+        }
+        g.lineTo(px + pw, py + ph); g.closePath(); g.fill();
+      };
+      ridge(py + ph * 0.70, 26, B.far, 4.4, 11.0);
+      ridge(py + ph * 0.78, 20, B.mid, 5.6, 13.0);
+      // rolling ground
+      const groundYAt = x => py + ph * 0.815 + Math.sin((x - px) / pw * 5.0 + 0.6) * 15;
+      const gg = g.createLinearGradient(0, py + ph * 0.7, 0, py + ph);
+      gg.addColorStop(0, B.gTop); gg.addColorStop(1, B.gBot);
+      g.fillStyle = gg; g.beginPath(); g.moveTo(px, py + ph);
+      for (let x = px; x <= px + pw; x += 12) g.lineTo(x, groundYAt(x));
+      g.lineTo(px + pw, py + ph); g.closePath(); g.fill();
+      g.strokeStyle = B.surf; g.lineWidth = 7; g.lineCap = "round";
+      g.beginPath();
+      for (let x = px; x <= px + pw; x += 12) { const y = groundYAt(x); if (x === px) g.moveTo(x, y); else g.lineTo(x, y); }
+      g.stroke();
+      // scenery props in the land's own style
+      cardProp(g, B.prop, px + 128, groundYAt(px + 128) + 4, 1.15, shade(B.mid));
+      cardProp(g, B.prop, px + pw - 138, groundYAt(px + pw - 138) + 4, 0.9, shade(B.mid));
+      // speed lines + dust behind the bike
+      g.strokeStyle = "rgba(255,255,255,0.55)"; g.lineWidth = 7;
+      for (let i = 0; i < 3; i++) {
+        const ly = groundYAt(px + pw * 0.5) - 118 + i * 34;
+        g.beginPath(); g.moveTo(px + pw * 0.5 - 268 - i * 26, ly); g.lineTo(px + pw * 0.5 - 168 - i * 18, ly); g.stroke();
+      }
+      g.fillStyle = "rgba(255,255,255,0.4)";
+      for (let i = 0; i < 4; i++) { g.beginPath(); g.arc(px + pw * 0.5 - 128 - i * 17, groundYAt(px + pw * 0.5) - 8 - i * 5, 9 + i * 4, 0, TAU); g.fill(); }
+      // motorbike & helmeted rider (the run's rider colour)
       const col = RIDER_COLORS[S.colorIdx];
-      g.save(); g.translate(215, 452); g.scale(95, -95); g.lineCap = "round"; g.lineJoin = "round";
+      const bxC = px + pw * 0.5, gyC = groundYAt(bxC);
+      g.fillStyle = "rgba(0,0,0,0.20)";
+      g.beginPath(); g.ellipse(bxC, gyC + 9, 152, 15, 0, 0, TAU); g.fill();
+      g.save(); g.translate(bxC, gyC - 57); g.scale(150, -150); g.lineCap = "round"; g.lineJoin = "round";
       g.strokeStyle = "#14161d"; g.lineWidth = 0.16;
       for (const wx of [-0.575, 0.575]) { g.beginPath(); g.arc(wx, -0.08, 0.30, 0, TAU); g.stroke(); }
       g.strokeStyle = "#9fb4c8"; g.lineWidth = 0.04;
       for (const wx of [-0.575, 0.575]) { g.beginPath(); g.arc(wx, -0.08, 0.17, 0, TAU); g.stroke(); }
+      g.strokeStyle = "#c8d8e8"; g.lineWidth = 0.028;
+      for (const wx of [-0.575, 0.575]) for (let k = 0; k < 3; k++) {
+        const a = k * TAU / 3 + 0.5;
+        g.beginPath(); g.moveTo(wx, -0.08); g.lineTo(wx + Math.cos(a) * 0.15, -0.08 + Math.sin(a) * 0.15); g.stroke();
+      }
       g.strokeStyle = "#46536a"; g.lineWidth = 0.07;
       g.beginPath(); g.moveTo(0, 0.02); g.lineTo(-0.575, -0.08); g.moveTo(0.36, 0.55); g.lineTo(0.575, -0.08); g.stroke();
       g.fillStyle = "#26303f"; g.beginPath(); g.roundRect(-0.19, -0.13, 0.38, 0.28, 0.04); g.fill();
@@ -2590,41 +2816,59 @@
       g.beginPath(); g.moveTo(-0.46, 0.52); g.lineTo(-0.02, 0.50); g.stroke();
       const J = riderJointsLocal(0);
       const L = (a, b, w2) => { g.lineWidth = w2; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); };
+      g.strokeStyle = "#1c2733";
       L(J.hip, J.kneeB, 0.11); L(J.kneeB, J.footB, 0.11); L(J.hip, J.kneeF, 0.11); L(J.kneeF, J.footF, 0.11);
-      L(J.hip, J.shoulder, 0.12); L(J.shoulder, J.elbow, 0.11); L(J.elbow, J.hand, 0.11);
+      g.strokeStyle = col;
+      L(J.hip, J.shoulder, 0.13); L(J.shoulder, J.elbow, 0.11); L(J.elbow, J.hand, 0.11);
       g.fillStyle = col; g.beginPath(); g.arc(J.head.x, J.head.y, 0.235, 0, TAU); g.fill();
       g.fillStyle = "rgba(8,14,24,0.9)";
       g.beginPath(); g.moveTo(J.head.x + 0.05, J.head.y + 0.10); g.lineTo(J.head.x + 0.24, J.head.y + 0.05);
       g.lineTo(J.head.x + 0.22, J.head.y - 0.06); g.lineTo(J.head.x + 0.05, J.head.y - 0.04); g.closePath(); g.fill();
       g.restore();
-      // stats
-      g.fillStyle = "#e8f4ff"; g.font = "700 40px Rajdhani, sans-serif";
-      const rows = [
-        ["SCORE", String(S.score)],
-        ["DISTANCE", Math.floor(S.dist) + " m"],
-        ["COINS", String(S.coins)],
-        ["FLIPS", String(S.flips)],
-        ["RIVALS DOWN", String(S.rivalsDown) + " · PASSED " + S.overtakes],
-        ["BEST SCORE", String(BEST[S.mode].score)]
-      ];
-      rows.forEach((r, i) => {
-        const y = 262 + i * 56;
-        g.fillStyle = "#8fd8e8"; g.font = "600 25px Rajdhani, sans-serif";
-        g.fillText(r[0], 560, y);
-        g.fillStyle = "#ffffff"; g.font = "700 38px Orbitron, monospace";
-        g.fillText(r[1], 800, y + 2);
-      });
-      const playShort = gameUrlShort();
-      if (playShort) {
-        g.fillStyle = "#5eead4"; g.font = "700 25px Rajdhani, sans-serif";
-        g.fillText("▶ PLAY: " + playShort, 56, 540);
-      }
-      g.fillStyle = "#6d8ea6"; g.font = "600 22px Rajdhani, sans-serif";
-      g.fillText("Open Road · " + new Date().toLocaleDateString(), 56, 584);
-      g.fillStyle = "#5eead4"; g.font = "700 22px Rajdhani, sans-serif";
-      g.textAlign = "right";
-      g.fillText("Made by Games Tribell Studios", 1144, 584);
+      g.restore(); // un-clip scene
+      // white frame around the scene
+      rrPath(g, px, py, pw, ph, 40);
+      g.strokeStyle = "#ffffff"; g.lineWidth = 12; g.stroke();
+      rrPath(g, px + 9, py + 9, pw - 18, ph - 18, 32);
+      g.strokeStyle = "rgba(20,40,70,0.18)"; g.lineWidth = 3; g.stroke();
+      // ---- theme chip overlapping the frame ----
+      const chipTxt = BIOME_EMOJI[S.farBiome] + "  " + B.name + " · " + (S.mode === "race" ? "CHECKPOINT RACE" : "ENDLESS RIDE");
+      g.font = "700 31px Rajdhani, sans-serif";
+      const chipW = Math.min(g.measureText(chipTxt).width + 58, 924);
+      rrPath(g, 500 - chipW / 2, py + ph - 30, chipW, 60, 30);
+      g.fillStyle = "#2b7de1"; g.fill();
+      g.strokeStyle = "#ffffff"; g.lineWidth = 4; g.stroke();
+      g.fillStyle = "#ffffff";
+      g.fillText(chipTxt, 500, py + ph + 11);
+      // ---- giant score + caption ----
+      const sg = g.createLinearGradient(0, 856, 0, 980);
+      sg.addColorStop(0, "#ffb020"); sg.addColorStop(1, "#ff7a1a");
+      g.font = "900 158px Orbitron, monospace";
+      g.shadowColor = "rgba(146,64,14,0.35)"; g.shadowOffsetY = 5; g.shadowBlur = 0;
+      g.fillStyle = sg;
+      g.fillText(String(S.score), 500, 972);
+      g.shadowColor = "transparent"; g.shadowOffsetY = 0;
+      const stars = "★".repeat(S.stars) + "☆".repeat(Math.max(0, 3 - S.stars));
+      g.fillStyle = "#33506b"; g.font = "700 30px Rajdhani, sans-serif";
+      g.fillText("POINTS · DISTANCE " + Math.floor(S.dist) + " M · " + stars, 500, 1026);
+      // ---- challenge code ----
+      g.fillStyle = "#5b7d99"; g.font = "700 23px Rajdhani, sans-serif";
+      g.fillText("B E A T   M E   O N   T H E   S A M E   R U N", 500, 1094);
+      g.fillStyle = "#12314f"; g.font = "700 54px Orbitron, monospace";
+      g.fillText(code, 500, 1158);
+      // ---- footer: play link + studio credit ----
+      let playShort = gameUrlShort();
       g.textAlign = "left";
+      g.font = "700 27px Rajdhani, sans-serif";
+      if (playShort && g.measureText("▶ PLAY: " + playShort).width > 545) playShort = playShort.split("/")[0]; // keep clear of the credit
+      if (playShort) {
+        g.fillStyle = "#0e7490";
+        g.fillText("▶ PLAY: " + playShort, 70, 1218);
+      }
+      g.textAlign = "right";
+      g.fillStyle = "#274b63"; g.font = "700 27px Rajdhani, sans-serif";
+      g.fillText("Games Tribell Studios", 930, 1218);
+      g.textAlign = "center";
       return c;
     }
     function cardBlob(cb) { drawCard().toBlob(cb, "image/png"); }
@@ -2662,32 +2906,30 @@
       return s.length > 48 ? (u.replace(/^https?:\/\//, "").split("/")[0]) : s;
     }
     function shareMessage(withUrl) {
-      const stars = "★".repeat(S.stars) + "☆".repeat(Math.max(0, 3 - S.stars));
-      const modeTxt = (S.mode === "race" ? "Checkpoint Race" : "Endless Ride") + " · " + S.diff.toUpperCase();
-      let t = "🏍️ I scored " + S.score + " in Stick Bike Racing: Open Road!\n" +
-        "🚀 " + Math.floor(S.dist) + " m · " + stars + " · " + modeTxt + " · " + S.flips + " flips\n" +
-        "Can you beat it?";
-      const u = gameUrl();
-      if (withUrl && u) t += " Play here: " + u;
+      const code = currentRunCode();
+      let t = "I rode " + Math.floor(S.dist) + " m through " + prettyBiome(BIOMES[S.farBiome].name) + " \u{1F3CD}️ and scored " + S.score +
+        " points in Stick Bike Racing: Open Road. Can you beat it?\n" +
+        "Beat me on the same run: " + code;
+      if (withUrl) { const l = challengeLink(); if (l) t += "\n" + l; }
       t += "\n— Games Tribell Studios";
       return t;
     }
     function syncShareLinks() {
       // refresh the fallback share anchors with the latest score + game link
-      const u = gameUrl(), msg = encodeURIComponent(shareMessage(true));
+      const u = gameUrl(), link = challengeLink() || u, msg = encodeURIComponent(shareMessage(true));
       const wa = $("shareWA"); if (wa) wa.href = "https://wa.me/?text=" + msg;
       const x = $("shareX"); if (x) x.href = "https://twitter.com/intent/tweet?text=" + msg;
       const fb = $("shareFB");
-      if (fb) { fb.style.display = u ? "" : "none"; if (u) fb.href = "https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent(u) + "&quote=" + msg; }
+      if (fb) { fb.style.display = link ? "" : "none"; if (link) fb.href = "https://www.facebook.com/sharer/sharer.php?u=" + encodeURIComponent(link) + "&quote=" + msg; }
       const tg = $("shareTG");
-      if (tg) { tg.style.display = u ? "" : "none"; if (u) tg.href = "https://t.me/share/url?url=" + encodeURIComponent(u) + "&text=" + msg; }
+      if (tg) { tg.style.display = link ? "" : "none"; if (link) tg.href = "https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + msg; }
     }
     async function shareScore() {
       // main share: card image + message + link via the Web Share API where the
       // browser supports file sharing (on phones this is how WhatsApp receives the
       // picture and the message together); otherwise text + link; last resort the
       // card downloads so it can be attached manually.
-      const u = gameUrl();
+      const u = challengeLink() || gameUrl();
       cardBlob(async b => {
         try {
           if (b && navigator.canShare && navigator.share) {
@@ -2755,11 +2997,11 @@
     document.addEventListener("visibilitychange", () => { if (document.hidden) pauseGame(); });
 
     /* ============================== UI WIRING ============================== */
-    $("modeEndless").addEventListener("click", () => { S.mode = "endless"; AU.init(); AU.click(); syncSetup(); });
-    $("modeRace").addEventListener("click", () => { S.mode = "race"; AU.init(); AU.click(); syncSetup(); });
+    $("modeEndless").addEventListener("click", () => { S.mode = "endless"; if (S.challenge && S.challenge.mode !== S.mode) clearChallenge(true); AU.init(); AU.click(); syncSetup(); });
+    $("modeRace").addEventListener("click", () => { S.mode = "race"; if (S.challenge && S.challenge.mode !== S.mode) clearChallenge(true); AU.init(); AU.click(); syncSetup(); });
     $("diffRow").addEventListener("click", e => {
       const b = e.target.closest("[data-diff]"); if (!b) return;
-      S.diff = b.dataset.diff; AU.init(); AU.click(); syncSetup();
+      S.diff = b.dataset.diff; if (S.challenge && S.challenge.diff !== S.diff) clearChallenge(true); AU.init(); AU.click(); syncSetup();
     });
     $("colorRow").addEventListener("click", e => {
       const b = e.target.closest("[data-color]"); if (!b) return;
@@ -2881,8 +3123,9 @@
     $("shareBtn").addEventListener("click", () => { AU.click(); shareScore(); });
     $("shareCopy").addEventListener("click", async () => {
       AU.click();
-      const u = gameUrl();
-      const payload = u || shareMessage(true);
+      // copies the challenge CODE (not the page address — the shell owns page
+      // sharing); a friend pastes it into the setup screen's challenge box
+      const payload = currentRunCode();
       let okCopy = false;
       try { await navigator.clipboard.writeText(payload); okCopy = true; }
       catch (e) {
@@ -2892,9 +3135,21 @@
         try { okCopy = document.execCommand("copy"); } catch (e2) { okCopy = false; }
         ta.remove();
       }
-      toast(okCopy ? (u ? "Game link copied!" : "Score message copied!") : "Copy failed — use a share button instead");
+      toast(okCopy ? "Challenge code copied: " + payload : "Copy failed — the code is printed on your card", 2400);
     });
     syncShareLinks();
+    /* ---- friend challenge code entry ---- */
+    $("codeApply").addEventListener("click", () => {
+      AU.init(); AU.click();
+      const dec = challengeDecode($("codeInput").value);
+      if (dec) { applyChallenge(dec); $("codeInput").value = ""; }
+      else toast("That code doesn't check out — copy it exactly from a friend's card", 2800);
+    });
+    $("codeInput").addEventListener("keydown", e => {
+      e.stopPropagation();
+      if (e.key === "Enter") $("codeApply").click();
+    });
+    $("challengeClear").addEventListener("click", () => { AU.init(); AU.click(); clearChallenge(); });
 
     /* ============================== MAIN LOOP ============================== */
     function resize() {
@@ -2952,6 +3207,7 @@
       }
     }, 16);
 
+    loadChallengeFromUrl();
     resetWorld();
     syncSetup();
     syncToggles();
@@ -2963,7 +3219,8 @@
       rivals: () => rivals, EVS, spawnRival, fireEvent, tryShove, activateNitro, honk,
       beginCountdown, onDeviceOrientation, syncControls,
       bgmEl: () => document.getElementById("bgmAudio"),
-      gameUrl, shareMessage, syncShareLinks,
+      gameUrl, shareMessage, syncShareLinks, drawCard, challengeEncode, challengeDecode, applyChallenge, clearChallenge,
+      currentRunCode, challengeLink, renderChallengeUI,
       bgmState: () => { const el = document.getElementById("bgmAudio"); return el ? { duration: el.duration, loop: el.loop, currentTime: el.currentTime, paused: el.paused } : null; },
       shareHrefs: () => ({ wa: $("shareWA") && $("shareWA").href, x: $("shareX") && $("shareX").href, fb: $("shareFB") && $("shareFB").href, tg: $("shareTG") && $("shareTG").href }) };
     </script>
